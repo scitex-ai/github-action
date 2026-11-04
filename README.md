@@ -393,6 +393,22 @@ Run the focused collector and action-integration regressions with
 `npm run build`. The historical Jest suite is separate; a passing focused run
 does not imply that suite passed.
 
+### Energy measurement bootstrap
+
+The build retains all energy measurement steps using immutable Eco CI v5.3.0
+(`782dd4a31bc426a6ae26a7b08d89af454b10ffc0`). Its bundled, pre-calculated
+power curves replace v1's live Python/XGBoost setup. Energy numbers across
+these model versions are not numerically comparable.
+
+Before the energy action runs, the workflow validates the ref name supplied
+through an environment variable. It accepts an ASCII letter/digit followed
+by letters, digits, `.`, `_`, `/` or `-`, and passes that exact value through
+a step output. Unusual names, including shell metacharacters, Unicode or a
+leading underscore, fail before measurement; they are not rewritten into
+misleading branch metadata. This boundary addresses this workflow's branch
+input, not arbitrary upstream inputs. Runner selection and other CI policy
+are unchanged.
+
 ## License
 
 Contributor License Agreement assistant

@@ -17,16 +17,30 @@ jobs:
       matrix:
         node-version: [18.x, 20.x]
     steps:
+    - name: Validate energy branch metadata
+      id: energy-metadata
+      shell: bash
+      env:
+        ENERGY_REF_NAME: ${{ github.ref_name }}
+      run: |
+        set -euo pipefail
+        if [[ ! "$ENERGY_REF_NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]; then
+          printf '%s\n' 'Refusing unsafe energy branch metadata.' >&2
+          exit 1
+        fi
+        printf 'branch=%s\n' "$ENERGY_REF_NAME" >> "$GITHUB_OUTPUT"
     - name: Initialize Energy Estimation
-      uses: green-coding-berlin/eco-ci-energy-estimation@v1
+      uses: green-coding-solutions/eco-ci-energy-estimation@782dd4a31bc426a6ae26a7b08d89af454b10ffc0 # v5.3.0
       with:
         task: start-measurement
+        branch: ${{ steps.energy-metadata.outputs.branch }}
     - name: "Checkout repository"
       uses: actions/checkout@v4
     - name: Checkout Repo Measurement
-      uses: green-coding-berlin/eco-ci-energy-estimation@v1
+      uses: green-coding-solutions/eco-ci-energy-estimation@782dd4a31bc426a6ae26a7b08d89af454b10ffc0 # v5.3.0
       with:
         task: get-measurement
+        branch: ${{ steps.energy-metadata.outputs.branch }}
         label: 'repository checkout'
     - name: Use Node.js ${{ matrix.node-version }}
       uses: actions/setup-node@v3
@@ -39,11 +53,13 @@ jobs:
     - name: Npm build
       run: npm run build --if-present
     - name: Checkout Repo Measurement
-      uses: green-coding-berlin/eco-ci-energy-estimation@v1
+      uses: green-coding-solutions/eco-ci-energy-estimation@782dd4a31bc426a6ae26a7b08d89af454b10ffc0 # v5.3.0
       with:
         task: get-measurement
+        branch: ${{ steps.energy-metadata.outputs.branch }}
         label: 'Npm activities'
     - name: Show Energy Results
-      uses: green-coding-berlin/eco-ci-energy-estimation@v1
+      uses: green-coding-solutions/eco-ci-energy-estimation@782dd4a31bc426a6ae26a7b08d89af454b10ffc0 # v5.3.0
       with:
         task: display-results
+        branch: ${{ steps.energy-metadata.outputs.branch }}
