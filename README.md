@@ -370,6 +370,29 @@ This PAT should have repo scope and is only required if you have configured to s
 </table>
 <!-- readme: collaborators,contributors -end -->
 
+## Complete pull-request attribution
+
+Contributor collection must finish before the action reads or updates the
+signature file or posts a CLA comment. The collector binds the repository,
+base and head identities, refs, state and declared commit count, and verifies
+the same snapshot again before returning contributors. It reads at most 2,000
+commits within 48 requests and 30 seconds, with a 4-second cap on each request.
+Partial responses, changed snapshots or ambiguous contributor identities fail
+the check rather than returning the contributors collected so far.
+
+The collector follows GraphQL commit pages. If that connection ends early, it
+requires a consistent prefix of at least 100 commits, reads the explicitly
+paginated immutable base/head comparison, and resolves the complete set of
+commit objects. Every original attribution is checked against those objects.
+The original first 100 commits retain their order. This changes collection
+coverage; it does not sign for contributors or change the allowlist, actor
+selection precedence, excluded bot or numeric-ID signature matching.
+
+Run the focused collector and action-integration regressions with
+`npm run test:attribution`, and rebuild the executable action with
+`npm run build`. The historical Jest suite is separate; a passing focused run
+does not imply that suite passed.
+
 ## License
 
 Contributor License Agreement assistant

@@ -5,6 +5,7 @@
   "main": "lib/main.js",
   "scripts": {
     "test": "jest",
+    "test:attribution": "tsc && node --test __tests__/completeCommitters.test.js",
     "build": "tsc && ncc build",
     "buildAndAdd": "npm run build && git add ."
   },

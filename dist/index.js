@@ -53,6 +53,243 @@ exports.checkAllowList = checkAllowList;
 
 /***/ }),
 
+/***/ 6554:
+/***/ (function(__unused_webpack_module, exports) {
+
+"use strict";
+
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.completeAttribution = exports.boundedTransport = exports.objectQuery = exports.PULL_QUERY = exports.COMMIT_FIELDS = void 0;
+// Read-only attribution must finish before setupClaCheck can touch signatures.
+// Transport callbacks keep the collector testable without GitHub credentials.
+exports.COMMIT_FIELDS = `oid author { email name user { id databaseId login } }
+  committer { name user { id databaseId login } }`;
+exports.PULL_QUERY = `query($owner:String!,$name:String!,$number:Int!,$cursor:String) {
+  repository(owner:$owner,name:$name) { id nameWithOwner pullRequest(number:$number) {
+    state baseRefOid headRefOid baseRefName headRefName
+    baseRepository { id nameWithOwner } headRepository { id nameWithOwner }
+    commits(first:100,after:$cursor) {
+      totalCount pageInfo { endCursor hasNextPage } nodes { commit { ${exports.COMMIT_FIELDS} } }
+    }
+  } }
+}`;
+const OID = /^[0-9a-f]{40}$/;
+const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
+const refuse = (message) => { throw new Error(message); };
+function objectQuery(ids) {
+    if (!ids.length || ids.length > 100 || new Set(ids).size !== ids.length ||
+        ids.some(id => !OID.test(id)))
+        refuse('Invalid commit-object batch');
+    return `query($owner:String!,$name:String!) { repository(owner:$owner,name:$name) {
+    ${ids.map((id, index) => `c${index}:object(oid:"${id}") {
+      ... on Commit { ${exports.COMMIT_FIELDS} }
+    }`).join('\n')}
+  } }`;
+}
+exports.objectQuery = objectQuery;
+// One shared budget covers initial, paginated, fallback and final reads.
+function boundedTransport(transport, now = Date.now) {
+    let calls = 0;
+    const deadline = now() + 30000;
+    function read(operation) {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (++calls > 48 || now() >= deadline)
+                refuse('Attribution budget exhausted');
+            let timer;
+            try {
+                const value = yield Promise.race([
+                    operation(),
+                    new Promise((_, reject) => {
+                        timer = setTimeout(() => reject(new Error('Attribution request timed out')), Math.min(4000, Math.max(1, deadline - now())));
+                    })
+                ]);
+                if (now() >= deadline)
+                    refuse('Attribution deadline exhausted');
+                return value;
+            }
+            finally {
+                if (timer !== undefined)
+                    clearTimeout(timer);
+            }
+        });
+    }
+    return {
+        pull: cursor => read(() => transport.pull(cursor)),
+        compare: (base, head, page) => read(() => transport.compare(base, head, page)),
+        objects: ids => read(() => transport.objects(ids))
+    };
+}
+exports.boundedTransport = boundedTransport;
+function actorProof(actor) {
+    if (actor === null)
+        return null;
+    if (!actor || !own(actor, 'name') || !own(actor, 'user') ||
+        !(actor.name === null || typeof actor.name === 'string')) {
+        refuse('Incomplete commit actor');
+    }
+    let user = null;
+    if (actor.user !== null) {
+        const value = actor.user;
+        if (!value || typeof value.login !== 'string' || !value.login ||
+            typeof value.id !== 'string' || !value.id ||
+            !Number.isSafeInteger(value.databaseId) || value.databaseId <= 0) {
+            refuse('Incomplete commit user');
+        }
+        user = { id: value.id, databaseId: value.databaseId, login: value.login };
+    }
+    return { name: actor.name, user };
+}
+function proof(commit) {
+    if (!commit || !OID.test(commit.oid) || !own(commit, 'author') ||
+        !own(commit, 'committer'))
+        refuse('Invalid commit attribution');
+    return JSON.stringify({ oid: commit.oid,
+        author: actorProof(commit.author), committer: actorProof(commit.committer) });
+}
+function snapshot(response, repository) {
+    var _a, _b, _c;
+    const repo = response === null || response === void 0 ? void 0 : response.repository;
+    const pull = repo === null || repo === void 0 ? void 0 : repo.pullRequest;
+    const count = (_a = pull === null || pull === void 0 ? void 0 : pull.commits) === null || _a === void 0 ? void 0 : _a.totalCount;
+    if ((repo === null || repo === void 0 ? void 0 : repo.nameWithOwner) !== repository ||
+        ((_b = pull === null || pull === void 0 ? void 0 : pull.baseRepository) === null || _b === void 0 ? void 0 : _b.nameWithOwner) !== repository ||
+        typeof (repo === null || repo === void 0 ? void 0 : repo.id) !== 'string' || !repo.id || pull.baseRepository.id !== repo.id ||
+        typeof ((_c = pull === null || pull === void 0 ? void 0 : pull.headRepository) === null || _c === void 0 ? void 0 : _c.id) !== 'string' || !pull.headRepository.id ||
+        typeof pull.headRepository.nameWithOwner !== 'string' || !pull.headRepository.nameWithOwner ||
+        !OID.test(pull === null || pull === void 0 ? void 0 : pull.baseRefOid) || !OID.test(pull === null || pull === void 0 ? void 0 : pull.headRefOid) ||
+        !['OPEN', 'CLOSED', 'MERGED'].includes(pull === null || pull === void 0 ? void 0 : pull.state) ||
+        typeof (pull === null || pull === void 0 ? void 0 : pull.baseRefName) !== 'string' || !pull.baseRefName ||
+        typeof (pull === null || pull === void 0 ? void 0 : pull.headRefName) !== 'string' || !pull.headRefName ||
+        !Number.isSafeInteger(count) || count < 1 || count > 2000) {
+        refuse('Invalid PR attribution snapshot');
+    }
+    return JSON.stringify([repository, repo.id, pull.state, pull.baseRefName,
+        pull.headRefName, pull.headRepository.id, pull.headRepository.nameWithOwner,
+        pull.baseRefOid, pull.headRefOid, count]);
+}
+function page(response, repository, expected) {
+    var _a;
+    if (snapshot(response, repository) !== expected)
+        refuse('PR attribution changed');
+    const connection = response.repository.pullRequest.commits;
+    if (!Array.isArray(connection.nodes) || connection.nodes.length > 100 ||
+        typeof ((_a = connection.pageInfo) === null || _a === void 0 ? void 0 : _a.hasNextPage) !== 'boolean') {
+        refuse('Incomplete PR attribution page');
+    }
+    return connection;
+}
+function immutableFallback(transport, pull, partial) {
+    var _a;
+    return __awaiter(this, void 0, void 0, function* () {
+        const count = pull.commits.totalCount;
+        if (partial.length < 100)
+            refuse('Insufficient capped attribution prefix');
+        const ids = [];
+        for (let index = 1; ids.length < count; index++) {
+            const response = yield transport.compare(pull.baseRefOid, pull.headRefOid, index);
+            const commits = response === null || response === void 0 ? void 0 : response.commits;
+            if (((_a = response === null || response === void 0 ? void 0 : response.base_commit) === null || _a === void 0 ? void 0 : _a.sha) !== pull.baseRefOid ||
+                (response === null || response === void 0 ? void 0 : response.total_commits) !== count || !Array.isArray(commits) ||
+                commits.length !== Math.min(100, count - ids.length)) {
+                refuse('Incomplete immutable comparison');
+            }
+            for (const commit of commits) {
+                if (!OID.test(commit === null || commit === void 0 ? void 0 : commit.sha) || ids.includes(commit.sha)) {
+                    refuse('Invalid immutable commit identity');
+                }
+                ids.push(commit.sha);
+            }
+        }
+        if (!ids.includes(pull.headRefOid))
+            refuse('Comparison omits PR head');
+        const canonical = new Map();
+        for (let index = 0; index < ids.length; index += 100) {
+            const batch = ids.slice(index, index + 100);
+            const commits = yield transport.objects(batch);
+            if (!Array.isArray(commits) || commits.length !== batch.length) {
+                refuse('Incomplete canonical attribution');
+            }
+            commits.forEach((commit, offset) => {
+                proof(commit);
+                if (commit.oid !== batch[offset])
+                    refuse('Canonical identity changed');
+                canonical.set(commit.oid, commit);
+            });
+        }
+        for (const commit of partial) {
+            if (proof(commit) !== proof(canonical.get(commit.oid))) {
+                refuse('Original commit attribution changed');
+            }
+        }
+        // Preserve the exact original first100 order that the old action covered.
+        const first = partial.slice(0, 100);
+        const prefix = new Set(first.map(commit => commit.oid));
+        return [...first, ...ids.filter(id => !prefix.has(id)).map(id => canonical.get(id))];
+    });
+}
+function completeAttribution(transport, repository) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const first = yield transport.pull(null);
+        const binding = snapshot(first, repository);
+        const pull = first.repository.pullRequest;
+        const count = pull.commits.totalCount;
+        const commits = [];
+        const seen = new Set();
+        const cursors = new Set();
+        let response = first;
+        while (true) {
+            const connection = page(response, repository, binding);
+            for (const row of connection.nodes) {
+                const commit = row === null || row === void 0 ? void 0 : row.commit;
+                proof(commit);
+                if (seen.has(commit.oid))
+                    refuse('Duplicate PR commit');
+                seen.add(commit.oid);
+                commits.push(commit);
+            }
+            if (commits.length > count || !connection.nodes.length) {
+                refuse('Invalid PR attribution count');
+            }
+            if (!connection.pageInfo.hasNextPage)
+                break;
+            const cursor = connection.pageInfo.endCursor;
+            if (typeof cursor !== 'string' || !cursor || cursors.has(cursor) ||
+                commits.length >= count)
+                refuse('Invalid PR attribution cursor');
+            cursors.add(cursor);
+            response = yield transport.pull(cursor);
+        }
+        const complete = commits.length === count ? commits :
+            yield immutableFallback(transport, pull, commits);
+        if (complete.length !== count || !complete.some(c => c.oid === pull.headRefOid)) {
+            refuse('Incomplete PR attribution');
+        }
+        const after = yield transport.pull(null);
+        const finalPage = page(after, repository, binding);
+        const firstPage = first.repository.pullRequest.commits;
+        if (finalPage.pageInfo.hasNextPage !== firstPage.pageInfo.hasNextPage ||
+            finalPage.pageInfo.endCursor !== firstPage.pageInfo.endCursor ||
+            finalPage.nodes.length !== firstPage.nodes.length ||
+            finalPage.nodes.some((row, index) => { var _a; return proof(row === null || row === void 0 ? void 0 : row.commit) !== proof((_a = firstPage.nodes[index]) === null || _a === void 0 ? void 0 : _a.commit); })) {
+            refuse('First-page attribution changed');
+        }
+        return complete;
+    });
+}
+exports.completeAttribution = completeAttribution;
+
+
+/***/ }),
+
 /***/ 5157:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -70,61 +307,51 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const octokit_1 = __nccwpck_require__(3258);
 const github_1 = __nccwpck_require__(5438);
+const completeCommitters_1 = __nccwpck_require__(6554);
 function getCommitters() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
             let committers = [];
             let filteredCommitters = [];
-            let response = yield octokit_1.octokit.graphql(`
-        query($owner:String! $name:String! $number:Int! $cursor:String!){
-            repository(owner: $owner, name: $name) {
-            pullRequest(number: $number) {
-                commits(first: 100, after: $cursor) {
-                    totalCount
-                    edges {
-                        node {
-                            commit {
-                                author {
-                                    email
-                                    name
-                                    user {
-                                        id
-                                        databaseId
-                                        login
-                                    }
-                                }
-                                committer {
-                                    name
-                                    user {
-                                        id
-                                        databaseId
-                                        login
-                                    }
-                                }
-                            }
-                        }
-                        cursor
-                    }
-                    pageInfo {
-                        endCursor
-                        hasNextPage
-                    }
-                }
-            }
-        }
-    }`.replace(/ /g, ''), {
-                owner: github_1.context.repo.owner,
-                name: github_1.context.repo.repo,
-                number: github_1.context.issue.number,
-                cursor: ''
+            const repository = github_1.context.repo.owner + '/' + github_1.context.repo.repo;
+            const transport = (0, completeCommitters_1.boundedTransport)({
+                pull: cursor => octokit_1.octokit.graphql(completeCommitters_1.PULL_QUERY, {
+                    owner: github_1.context.repo.owner, name: github_1.context.repo.repo,
+                    number: github_1.context.issue.number, cursor, request: { timeout: 4000 }
+                }),
+                compare: (base, head, page) => __awaiter(this, void 0, void 0, function* () {
+                    return (yield octokit_1.octokit.request('GET /repos/{owner}/{repo}/compare/{basehead}', {
+                        owner: github_1.context.repo.owner, repo: github_1.context.repo.repo,
+                        basehead: base + '...' + head, per_page: 100, page,
+                        request: { timeout: 4000 }
+                    })).data;
+                }),
+                objects: (ids) => __awaiter(this, void 0, void 0, function* () {
+                    const data = yield octokit_1.octokit.graphql((0, completeCommitters_1.objectQuery)(ids), {
+                        owner: github_1.context.repo.owner, name: github_1.context.repo.repo,
+                        request: { timeout: 4000 }
+                    });
+                    return ids.map((_, index) => { var _a; return (_a = data.repository) === null || _a === void 0 ? void 0 : _a['c' + index]; });
+                })
             });
-            response.repository.pullRequest.commits.edges.forEach(edge => {
-                const committer = extractUserFromCommit(edge.node.commit);
+            const commits = yield (0, completeCommitters_1.completeAttribution)(transport, repository);
+            const names = new Map();
+            const ids = new Map();
+            commits.forEach(commit => {
+                const committer = extractUserFromCommit(commit);
                 let user = {
                     name: committer.login || committer.name,
                     id: committer.databaseId || '',
                     pullRequestNo: github_1.context.issue.number
                 };
+                if (typeof user.name !== 'string' || !user.name ||
+                    (names.has(user.name) && names.get(user.name) !== user.id) ||
+                    (user.id && ids.has(user.id) && ids.get(user.id) !== user.name)) {
+                    throw new Error('Ambiguous contributor identity; refusing incomplete CLA coverage');
+                }
+                names.set(user.name, user.id);
+                if (user.id)
+                    ids.set(user.id, user.name);
                 if (committers.length === 0 || committers.map((c) => {
                     return c.name;
                 }).indexOf(user.name) < 0) {
